@@ -1,7 +1,0 @@
-path: C:\Users\juans\OneDrive\Documents\MatesML\Common-Garden\datasets\obj2_loto\held_ST2
-train: images/train
-val: images/val
-test: images/test
-names:
-  0: plant
-  1: pot

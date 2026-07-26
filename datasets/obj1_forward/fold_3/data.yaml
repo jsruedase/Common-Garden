@@ -1,6 +1,0 @@
-path: C:\Users\juans\OneDrive\Documents\MatesML\Common-Garden\datasets\obj1_forward\fold_3
-train: images/train
-val: images/val
-names:
-  0: plant
-  1: pot
