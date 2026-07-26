@@ -1,0 +1,31 @@
+{
+  "terrace": "ST1",
+  "template_date": 1,
+  "n_beds": 43,
+  "dates": [
+    {
+      "date": 2,
+      "matched": {
+        "4A-3-1": {"bed_position": "4A-3-1", "correct": true},
+        "4A-3-2": {"bed_position": "4A-3-2", "correct": true},
+        "4A-4-1": {"bed_position": "4A-4-1", "correct": true}
+      },
+      "appeared": [],
+      "disappeared": ["4B-1-2"],
+      "id_switches": 0
+    },
+    {
+      "date": 3,
+      "matched": {
+        "4A-3-1": {"bed_position": "4A-3-1", "correct": true},
+        "4A-3-2": {"bed_position": "4A-3-2", "correct": true}
+      },
+      "appeared": ["4C-2-1"],
+      "disappeared": [],
+      "id_switches": 1
+    }
+  ],
+  "IDF1": 0.9762,
+  "ID_switches": 1,
+  "node_accuracy": 0.9762
+}
