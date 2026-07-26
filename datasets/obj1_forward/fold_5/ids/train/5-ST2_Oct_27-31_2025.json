@@ -1,228 +1,216 @@
 [
   {
     "i": 0,
-    "class": "plant",
-    "bed_position": "4A-4-7",
-    "collection_id": "YAM-1035"
-  },
-  {
-    "i": 1,
-    "class": "pot",
-    "bed_position": "4A-4-7",
-    "collection_id": "YAM-1035"
-  },
-  {
-    "i": 2,
     "class": "pot",
     "bed_position": "3A-3-5",
     "collection_id": "YAM-1007"
   },
   {
-    "i": 3,
+    "i": 1,
     "class": "pot",
     "bed_position": "1A-1-7",
     "collection_id": "YAM-1015"
   },
   {
-    "i": 4,
+    "i": 2,
     "class": "pot",
     "bed_position": "5A-1-9",
     "collection_id": "YAM-1020"
   },
   {
-    "i": 5,
+    "i": 3,
     "class": "pot",
     "bed_position": "2A-2-3",
     "collection_id": "YAM-1009"
   },
   {
-    "i": 6,
+    "i": 4,
     "class": "pot",
     "bed_position": "2A-2-6",
     "collection_id": "YAM-1028"
   },
   {
-    "i": 7,
+    "i": 5,
     "class": "pot",
     "bed_position": "5A-1-1",
     "collection_id": "YAM-1020"
   },
   {
-    "i": 8,
+    "i": 6,
     "class": "pot",
     "bed_position": "2A-4-4",
     "collection_id": "YAM-1002"
   },
   {
-    "i": 9,
+    "i": 7,
     "class": "pot",
     "bed_position": "2A-4-1",
     "collection_id": "YAM-1007"
   },
   {
-    "i": 10,
+    "i": 8,
     "class": "pot",
     "bed_position": "5A-4-5",
     "collection_id": "YAM-1012"
   },
   {
-    "i": 11,
+    "i": 9,
     "class": "pot",
     "bed_position": "1A-5-6",
     "collection_id": "YAM-1009"
   },
   {
-    "i": 12,
+    "i": 10,
     "class": "pot",
     "bed_position": "4A-3-5",
     "collection_id": "YAM-1014"
   },
   {
-    "i": 13,
+    "i": 11,
     "class": "pot",
     "bed_position": "2A-2-8",
     "collection_id": "YAM-1035"
   },
   {
-    "i": 14,
+    "i": 12,
     "class": "pot",
     "bed_position": "3A-1-5",
     "collection_id": "YAM-1009"
   },
   {
-    "i": 15,
+    "i": 13,
     "class": "pot",
     "bed_position": "2A-5-4",
     "collection_id": "YAM-1015"
   },
   {
-    "i": 16,
+    "i": 14,
     "class": "pot",
     "bed_position": "2A-2-4",
     "collection_id": "YAM-1042"
   },
   {
-    "i": 17,
+    "i": 15,
     "class": "pot",
     "bed_position": "3A-4-5",
     "collection_id": "YAM-1036"
   },
   {
-    "i": 18,
+    "i": 16,
     "class": "pot",
     "bed_position": "5A-5-3",
     "collection_id": "YAM-1007"
   },
   {
-    "i": 19,
+    "i": 17,
     "class": "pot",
     "bed_position": "4A-1-9",
     "collection_id": "YAM-1020"
   },
   {
-    "i": 20,
+    "i": 18,
     "class": "plant",
     "bed_position": "3A-3-5",
     "collection_id": "YAM-1007"
   },
   {
-    "i": 21,
+    "i": 19,
     "class": "plant",
     "bed_position": "2A-4-1",
     "collection_id": "YAM-1007"
   },
   {
-    "i": 22,
+    "i": 20,
     "class": "plant",
     "bed_position": "5A-4-5",
     "collection_id": "YAM-1012"
   },
   {
-    "i": 23,
+    "i": 21,
     "class": "plant",
     "bed_position": "1A-1-7",
     "collection_id": "YAM-1015"
   },
   {
-    "i": 24,
+    "i": 22,
     "class": "plant",
     "bed_position": "1A-5-6",
     "collection_id": "YAM-1009"
   },
   {
-    "i": 25,
+    "i": 23,
     "class": "plant",
     "bed_position": "4A-3-5",
     "collection_id": "YAM-1014"
   },
   {
-    "i": 26,
+    "i": 24,
     "class": "plant",
     "bed_position": "5A-1-9",
     "collection_id": "YAM-1020"
   },
   {
-    "i": 27,
+    "i": 25,
     "class": "plant",
     "bed_position": "2A-2-6",
     "collection_id": "YAM-1028"
   },
   {
-    "i": 28,
+    "i": 26,
     "class": "plant",
     "bed_position": "2A-2-8",
     "collection_id": "YAM-1035"
   },
   {
-    "i": 29,
+    "i": 27,
     "class": "plant",
     "bed_position": "3A-1-5",
     "collection_id": "YAM-1009"
   },
   {
-    "i": 30,
+    "i": 28,
     "class": "plant",
     "bed_position": "4A-1-9",
     "collection_id": "YAM-1020"
   },
   {
-    "i": 31,
+    "i": 29,
     "class": "plant",
     "bed_position": "5A-1-1",
     "collection_id": "YAM-1020"
   },
   {
-    "i": 32,
+    "i": 30,
     "class": "plant",
     "bed_position": "2A-2-4",
     "collection_id": "YAM-1042"
   },
   {
-    "i": 33,
+    "i": 31,
     "class": "plant",
     "bed_position": "2A-2-3",
     "collection_id": "YAM-1009"
   },
   {
-    "i": 34,
+    "i": 32,
     "class": "plant",
     "bed_position": "2A-4-4",
     "collection_id": "YAM-1002"
   },
   {
-    "i": 35,
+    "i": 33,
     "class": "plant",
     "bed_position": "2A-5-4",
     "collection_id": "YAM-1015"
   },
   {
-    "i": 36,
+    "i": 34,
     "class": "plant",
     "bed_position": "3A-4-5",
     "collection_id": "YAM-1036"
   },
   {
-    "i": 37,
+    "i": 35,
     "class": "plant",
     "bed_position": "5A-5-3",
     "collection_id": "YAM-1007"

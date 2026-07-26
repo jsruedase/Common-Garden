@@ -214,17 +214,5 @@
     "class": "plant",
     "bed_position": "5A-5-3",
     "collection_id": "YAM-1007"
-  },
-  {
-    "i": 36,
-    "class": "plant",
-    "bed_position": "4A-4-7",
-    "collection_id": "YAM-1035"
-  },
-  {
-    "i": 37,
-    "class": "pot",
-    "bed_position": "4A-4-7",
-    "collection_id": "YAM-1035"
   }
 ]
