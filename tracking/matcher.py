@@ -23,15 +23,15 @@ This is Tier-1: detections are the ground-truth instances, so it measures the
 matcher + registration alone, independent of the segmentation model.
 
 Usage:
-    python matcher.py                       # all terrace_*.json here
+    python matcher.py                       # all terrace_*.json in ../data/annotations
     python matcher.py terrace_1.json        # one terrace
     python matcher.py /path/to/images       # a directory arg = real-image folder
     python matcher.py terrace_7.json imgs/  # combine
-Figures are written to ./figs (grids) and ./figs/overlays (per-image overlays).
+Figures are written to ../data/figs (grids) and ../data/figs/overlays (per-image overlays).
 """
-import glob
 import os
 import sys
+from pathlib import Path
 
 import numpy as np
 from scipy.optimize import linear_sum_assignment
@@ -43,6 +43,11 @@ from diagnostic import load_terrace, umeyama, nn_spacing
 
 PLANT, POT = "planta", "matera"
 COLORS = {"correct": "#1a9850", "wrong": "#d73027", "new": "#4575b4", "seed": "#555555"}
+
+DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+ANNOTATIONS_DIR = DATA_DIR / "annotations"
+IMAGES_DIR = DATA_DIR / "images"
+FIGS_DIR = DATA_DIR / "figs"
 
 
 # ------------------------------- geometry --------------------------------- #
@@ -279,11 +284,12 @@ def overlay_all(res, terr, frames, images_dir, out_dir):
 # --------------------------------- main ----------------------------------- #
 def main():
     args = sys.argv[1:]
-    images_dir = "images"
-    paths = [a for a in args if a.endswith(".json")] or sorted(glob.glob("annotations/terrace_*.json"))
+    images_dir = str(IMAGES_DIR)
+    paths = [a for a in args if a.endswith(".json")] or sorted(str(p) for p in ANNOTATIONS_DIR.glob("terrace_*.json"))
     if not paths:
-        print("No terrace_*.json found."); sys.exit(1)
-    os.makedirs("figs", exist_ok=True)
+        print(f"No terrace_*.json found in {ANNOTATIONS_DIR}."); sys.exit(1)
+    out_dir = str(FIGS_DIR)
+    os.makedirs(out_dir, exist_ok=True)
     print(f"{'terrace':8s} {'IDF1':>6s} {'core-track':>11s} {'switches':>9s} {'enrolled':>9s} {'confused':>9s}")
     n_real = n_schem = 0
     for p in paths:
@@ -294,11 +300,11 @@ def main():
         terr = sorted(frames, key=lambda f: f["seq"])[0]["terrace"]
         m = score(res)
         print(f"{terr:8s} {m['idf1']:6.2f} {m['core_acc']:10.0%} {m['switches']:9d} {m['enrolled']:9d} {m['confused']:9d}")
-        draw_terrace(res, terr, "figs")
-        for _, real in overlay_all(res, terr, frames, images_dir, "figs"):
+        draw_terrace(res, terr, out_dir)
+        for _, real in overlay_all(res, terr, frames, images_dir, out_dir):
             n_real += real; n_schem += not real
-    print(f"\noverlays written to figs/overlays/  ({n_real} on real images, {n_schem} schematic)")
-    print("grids written to figs/")
+    print(f"\noverlays written to {out_dir}/overlays/  ({n_real} on real images, {n_schem} schematic)")
+    print(f"grids written to {out_dir}/")
 
 
 if __name__ == "__main__":

@@ -22,20 +22,23 @@ movers fall out as outliers. Identity is the linked bed_position textarea (share
 plant and pot); class is the region label (Matera/Planta). Coords are percent.
 
 Usage:
-    python diagnostic.py                     # all terrace_*.json in this folder
+    python diagnostic.py                     # all terrace_*.json in ../data/annotations
     python diagnostic.py terrace_1.json ...  # or explicit files
 """
-import glob
 import json
 import os
 import re
 import sys
+from pathlib import Path
 
 import numpy as np
 
 REG_CLASS = "matera"      # register on pots (one per bed, clean centres)
 PLANT_CLASS = "planta"    # measure movement on plants
 _FN = re.compile(r"-(\d+)-(ST\d+)_(.+)\.jpe?g$", re.I)
+
+DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+ANNOTATIONS_DIR = DATA_DIR / "annotations"
 
 
 # ----------------------------- geometry ----------------------------------- #
@@ -213,9 +216,9 @@ def report(frames):
 
 
 def main():
-    paths = sys.argv[1:] or sorted(glob.glob("annotations/terrace_*.json"))
+    paths = sys.argv[1:] or sorted(str(p) for p in ANNOTATIONS_DIR.glob("terrace_*.json"))
     if not paths:
-        print("No terrace_*.json found. Pass paths, or run in the folder with them.")
+        print(f"No terrace_*.json found. Pass paths, or place them in {ANNOTATIONS_DIR}.")
         sys.exit(1)
     allr = [r for p in paths for r in [report(load_terrace(p))] if r]
     if not allr:

@@ -10,9 +10,9 @@ lee su métrica, los descarta, y reporta el promedio y la desviación entre fold
 Eso es la estimación de CV. NO se elige "el mejor fold": se promedian.
 
 Uso:
-    python cv_run.py --folds datasets/obj2_loto
-    python cv_run.py --folds datasets/obj1_forward --epochs 100 --imgsz 1280 --batch 2
-    python cv_run.py --folds datasets/obj2_loto --eval-split test   # LOTO se evalúa en test
+    python modeling/cv_run.py --folds datasets/obj2_loto
+    python modeling/cv_run.py --folds datasets/obj1_forward --epochs 100 --imgsz 1280 --batch 2
+    python modeling/cv_run.py --folds datasets/obj2_loto --eval-split test   # LOTO se evalúa en test
 """
 
 from __future__ import annotations

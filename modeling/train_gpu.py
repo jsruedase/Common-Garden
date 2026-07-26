@@ -7,10 +7,10 @@ así que no hay que cambiar nada del código — solo instalar la rueda de PyTor
 correcta (CUDA o ROCm) y pasar --device 0.
 
 Uso:
-    python train_gpu.py                                     # obj1_final
-    python train_gpu.py --data datasets/obj2_loto/held_ST1/data.yaml
-    python train_gpu.py --weights yolo26m-seg.pt --imgsz 1280 --batch -1
-    python train_gpu.py --device 0,1                        # multi-GPU
+    python modeling/train_gpu.py                                     # obj1_final
+    python modeling/train_gpu.py --data datasets/obj2_loto/held_ST1/data.yaml
+    python modeling/train_gpu.py --weights yolo26m-seg.pt --imgsz 1280 --batch -1
+    python modeling/train_gpu.py --device 0,1                        # multi-GPU
 """
 
 from __future__ import annotations

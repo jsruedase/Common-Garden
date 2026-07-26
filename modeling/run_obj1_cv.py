@@ -10,9 +10,9 @@ para que baste UN comando.
   - Solo CPU:               imgsz menor, batch chico, modelo 'n', y avisa que va lento.
 
 Uso:
-    python run_obj1_cv.py                         # auto-detecta GPU/CPU
-    python run_obj1_cv.py --weights yolo26s-seg.pt --epochs 200
-    python run_obj1_cv.py --folds datasets/obj1_forward --imgsz 1280
+    python modeling/run_obj1_cv.py                         # auto-detecta GPU/CPU
+    python modeling/run_obj1_cv.py --weights yolo26s-seg.pt --epochs 200
+    python modeling/run_obj1_cv.py --folds datasets/obj1_forward --imgsz 1280
 """
 
 from __future__ import annotations

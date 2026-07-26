@@ -7,9 +7,9 @@ se producen métricas y visualizaciones). Para resultados reales: más épocas,
 imgsz alto y GPU.
 
 Uso:
-    python quick_train.py                                   # usa obj1_final
-    python quick_train.py --data datasets/obj2_loto/held_ST1/data.yaml
-    python quick_train.py --epochs 10 --imgsz 960 --weights yolo26s-seg.pt
+    python modeling/quick_train.py                                   # usa obj1_final
+    python modeling/quick_train.py --data datasets/obj2_loto/held_ST1/data.yaml
+    python modeling/quick_train.py --epochs 10 --imgsz 960 --weights yolo26s-seg.pt
 """
 
 from __future__ import annotations

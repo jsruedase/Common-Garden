@@ -14,8 +14,8 @@ Salida por imagen:
   - <stem>.png   overlay para revisar visualmente (opcional, --save-vis)
 
 Uso:
-    python postprocess.py --weights runs_train/gpu/weights/best.pt --source dataset/images
-    python postprocess.py --weights best.pt --source una_imagen.JPG --save-vis
+    python modeling/postprocess.py --weights runs_train/gpu/weights/best.pt --source dataset/images
+    python modeling/postprocess.py --weights best.pt --source una_imagen.JPG --save-vis
 """
 
 from __future__ import annotations
