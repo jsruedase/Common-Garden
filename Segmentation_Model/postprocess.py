@@ -116,9 +116,6 @@ def draw_overlay(img, instances):
     return img
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Driver (usa YOLO para predecir; import perezoso)
-# ─────────────────────────────────────────────────────────────────────────────
 def main():
     ap = argparse.ArgumentParser(description="Convexos (plantas) + elipses (materas)")
     ap.add_argument("--weights", default=Path("Segmentation_Model/best.pt"), type=Path)
