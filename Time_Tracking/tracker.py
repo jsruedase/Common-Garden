@@ -200,7 +200,7 @@ def main():
         print("No terrace_*.json found."); sys.exit(1)
 
     embed = probe.build_embedder()
-    os.makedirs("Outputs/figs", exist_ok=True)
+    os.makedirs("Outputs/figs/tracker", exist_ok=True)
     print(f"\n{'terrace':8s} {'α':>4s} {'IDF1':>6s} {'core':>6s} {'switch':>7s} {'conf':>5s} {'enrl':>5s}")
 
     lifts = []
@@ -228,8 +228,8 @@ def main():
         # choose alpha for the visuals and render with matcher.py's own functions
         chosen = (next(r for r in sweep if r["alpha"] == VIZ_ALPHA) if VIZ_ALPHA is not None
                   else max(sweep, key=lambda r: r["idf1"]))
-        matcher.draw_terrace(chosen["res"], terr, "Outputs/figs")                     # grid
-        matcher.overlay_all(chosen["res"], terr, frames, images_dir, "Outputs/figs")  # overlays
+        matcher.draw_terrace(chosen["res"], terr, "Outputs/figs/tracker")                     # grid
+        matcher.overlay_all(chosen["res"], terr, frames, images_dir, "Outputs/figs/tracker")  # overlays
         draw_sweep(terr, sweep, "Outputs/figs/tracker")
 
         geom = next(r for r in sweep if r["alpha"] == 1.0)
@@ -242,7 +242,7 @@ def main():
             print(f"{terr:8s} {g:6.2f} {b:6.2f} {a:4.1f} {b - g:+6.2f}")
         gm = np.mean([g for _, g, _, _ in lifts]); bm = np.mean([b for _, _, b, _ in lifts])
         print(f"{'MEAN':8s} {gm:6.2f} {bm:6.2f} {'':4s} {bm - gm:+6.2f}")
-        print("\ngrids -> Outputs/figs/tracking_*.png   overlays -> Outputs/figs/Outputs/overlays/")
+        print("\ngrids -> Outputs/figs/tracker/   overlays -> Outputs/figs/tracker/overlays/")
         print("sweeps -> Outputs/figs/tracker/")
 
 

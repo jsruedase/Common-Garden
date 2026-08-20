@@ -283,7 +283,7 @@ def main():
     paths = [a for a in args if a.endswith(".json")] or sorted(glob.glob("Assets/annotations/terrace_*.json"))
     if not paths:
         print("No terrace_*.json found."); sys.exit(1)
-    os.makedirs("Outputs/figs", exist_ok=True)
+    os.makedirs("Outputs/figs/matcher", exist_ok=True)
     print(f"{'terrace':8s} {'IDF1':>6s} {'core-track':>11s} {'switches':>9s} {'enrolled':>9s} {'confused':>9s}")
     n_real = n_schem = 0
     for p in paths:
@@ -294,11 +294,11 @@ def main():
         terr = sorted(frames, key=lambda f: f["seq"])[0]["terrace"]
         m = score(res)
         print(f"{terr:8s} {m['idf1']:6.2f} {m['core_acc']:10.0%} {m['switches']:9d} {m['enrolled']:9d} {m['confused']:9d}")
-        draw_terrace(res, terr, "Outputs/figs")
-        for _, real in overlay_all(res, terr, frames, images_dir, "Outputs/figs"):
+        draw_terrace(res, terr, "Outputs/figs/matcher")
+        for _, real in overlay_all(res, terr, frames, images_dir, "Outputs/figs/matcher"):
             n_real += real; n_schem += not real
-    print(f"\noverlays written to Outputs/figs/overlays/  ({n_real} on real images, {n_schem} schematic)")
-    print("grids written to Outputs/figs/")
+    print(f"\noverlays written to Outputs/figs/matcher/  ({n_real} on real images, {n_schem} schematic)")
+    print("grids written to Outputs/figs/matcher/")
 
 
 if __name__ == "__main__":
