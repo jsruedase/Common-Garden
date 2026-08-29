@@ -1,0 +1,14 @@
+# App de seguimiento (mínimo, solo geometría)
+streamlit>=1.30
+numpy
+scipy
+matplotlib
+
+# Solo si además quieres el post-proceso del segmentador (postprocess.py)
+ultralytics
+opencv-python-headless
+
+# Solo si activas la opción de apariencia (DINOv3) en la app
+# torch
+# timm
+# pillow
