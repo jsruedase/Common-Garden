@@ -10,18 +10,26 @@ Para cada instancia también se calcula el CENTROIDE, que es lo que alimenta la
 etapa de re-identificación / seguimiento.
 
 Salida por imagen:
-  - <stem>.json  con las instancias (clase, forma, centroide)
+  - <stem>.json  objeto con: image, image_width, image_height, e "instances"
+                 (cada instancia: clase, forma [convex_polygon/ellipse], centroide).
+                 El ancho/alto se guardan para poder convertir a Label Studio
+                 (que usa coordenadas en % de la imagen).
   - <stem>.png   overlay para revisar visualmente (opcional, --save-vis)
 
 Uso:
-    python postprocess.py --weights runs_train/gpu/weights/best.pt --source dataset/images
-    python postprocess.py --weights best.pt --source una_imagen.JPG --save-vis
+    python postprocess.py --weights best.pt --source dataset/images --save-vis
+    # además, exportar tareas de Label Studio (pre-anotaciones para corregir):
+    python postprocess.py --weights best.pt --source dataset/images --labelstudio
+    python postprocess.py --weights best.pt --source img.JPG --labelstudio \
+        --url-prefix "/data/local-files/?d=images/"
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import random
+import string
 from pathlib import Path
 
 import cv2
@@ -57,11 +65,14 @@ def fit_ellipse(points: np.ndarray):
     if len(pts) < 5:
         return None
     (cx, cy), (d1, d2), angle = cv2.fitEllipse(pts.reshape(-1, 1, 2))
+    # d1,d2 = diámetros en el marco local de la elipse (x local, y local) a 'angle'.
+    # Se guardan los SEMIEJES crudos (rx,ry) y la rotación tal cual: así el round-trip
+    # a Label Studio (x,y,radiusX,radiusY,rotation) es exacto y sin ambigüedad de eje.
     return {
         "cx": float(cx), "cy": float(cy),
-        "axis_major": float(max(d1, d2)),      # eje mayor (diámetro)
-        "axis_minor": float(min(d1, d2)),      # eje menor (diámetro)
-        "angle_deg": float(angle),
+        "rx": float(d1 / 2.0), "ry": float(d2 / 2.0),   # semiejes en píxeles (marco local)
+        "rotation_deg": float(angle),
+        "axis_major": float(max(d1, d2)), "axis_minor": float(min(d1, d2)),  # solo informativo
     }
 
 
@@ -109,24 +120,117 @@ def draw_overlay(img, instances):
         elif ins["shape"] == "ellipse" and ins["ellipse"]:
             e = ins["ellipse"]
             cv2.ellipse(img, (int(e["cx"]), int(e["cy"])),
-                        (int(e["axis_major"] / 2), int(e["axis_minor"] / 2)),
-                        e["angle_deg"], 0, 360, (0, 120, 255), 2)
+                        (int(e["rx"]), int(e["ry"])),
+                        e["rotation_deg"], 0, 360, (0, 120, 255), 2)
         cx, cy = [int(v) for v in ins["centroid"]]
         cv2.circle(img, (cx, cy), 3, (0, 0, 255), -1)
     return img
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Driver (usa YOLO para predecir; import perezoso)
+# ─────────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# Export a Label Studio (pre-anotaciones para que el biólogo corrija)
+# ─────────────────────────────────────────────────────────────────────────────
+PLANT_LABEL = "Planta"
+POT_LABEL = "Matera"
+MODEL_VERSION = "yolo26m-seg"
+
+
+def _rid(n: int = 10) -> str:
+    """id de region estilo Label Studio (alfanumérico)."""
+    return "".join(random.choices(string.ascii_letters + string.digits, k=n))
+
+
+def _ls_entry(rid, from_name, type_, value, W, H):
+    return {"id": rid, "type": type_, "from_name": from_name, "to_name": "image",
+            "original_width": int(W), "original_height": int(H),
+            "image_rotation": 0, "origin": "manual", "value": value}
+
+
+def _pct(v, size):
+    return round(float(v) / float(size) * 100.0, 6)
+
+
+def _plant_region(inst, W, H):
+    rid = _rid()
+    pts = [[_pct(x, W), _pct(y, H)] for x, y in inst["polygon"]]
+    geo = {"points": pts, "closed": True}
+    return [
+        _ls_entry(rid, "plant_polygon", "polygonlabels", {**geo, "polygonlabels": [PLANT_LABEL]}, W, H),
+        _ls_entry(rid, "collection_id", "textarea", {**geo, "text": [""]}, W, H),
+        _ls_entry(rid, "bed_position", "textarea", {**geo, "text": [""]}, W, H),
+    ]
+
+
+def _ellipse_geo(inst, W, H):
+    """Geometría de elipse en % (semiejes crudos + rotación); fallback a bbox del polígono."""
+    e = inst.get("ellipse")
+    if e and all(k in e for k in ("cx", "cy", "rx", "ry", "rotation_deg")):
+        return {"x": _pct(e["cx"], W), "y": _pct(e["cy"], H),
+                "radiusX": _pct(e["rx"], W), "radiusY": _pct(e["ry"], H),
+                "rotation": round(float(e["rotation_deg"]), 6)}
+    poly = inst.get("polygon", [])
+    if not poly:
+        return None
+    xs = [p[0] for p in poly]; ys = [p[1] for p in poly]
+    cx, cy = (min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2
+    rx, ry = (max(xs) - min(xs)) / 2, (max(ys) - min(ys)) / 2
+    return {"x": _pct(cx, W), "y": _pct(cy, H),
+            "radiusX": _pct(rx, W), "radiusY": _pct(ry, H), "rotation": 0}
+
+
+def _pot_region(inst, W, H):
+    geo = _ellipse_geo(inst, W, H)
+    if geo is None:
+        return []
+    rid = _rid()
+    return [
+        _ls_entry(rid, "pot_ellipse", "ellipselabels", {**geo, "ellipselabels": [POT_LABEL]}, W, H),
+        _ls_entry(rid, "collection_id", "textarea", {**geo, "text": [""]}, W, H),
+        _ls_entry(rid, "bed_position", "textarea", {**geo, "text": [""]}, W, H),
+    ]
+
+
+def record_to_labelstudio(record: dict, url_prefix: str = "") -> dict:
+    """Convierte un 'record' de postprocess en una tarea de Label Studio con pre-anotaciones."""
+    W, H = record["image_width"], record["image_height"]
+    result = []
+    for inst in record.get("instances", []):
+        if inst.get("class") == "plant" and inst.get("shape") == "convex_polygon":
+            result += _plant_region(inst, W, H)
+        elif inst.get("class") == "pot":
+            result += _pot_region(inst, W, H)
+    return {"data": {"image": url_prefix + record["image"]},
+            "predictions": [{"model_version": MODEL_VERSION, "result": result}]}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Driver
+# ─────────────────────────────────────────────────────────────────────────────
 def main():
     ap = argparse.ArgumentParser(description="Convexos (plantas) + elipses (materas)")
     ap.add_argument("--weights", default=Path("Segmentation_Model/best.pt"), type=Path)
-    ap.add_argument("--source", default=Path("Assets/images/3-ST6_Sep_29-Oct_3_2025.JPG"), type=Path, help="imagen o carpeta de imágenes")
+    ap.add_argument("--source", default=Path("Assets/images/5-ST8_Nov_24-28_2025.JPG"), type=Path, help="imagen o carpeta de imágenes")
     ap.add_argument("--out", default=Path("Outputs/postprocessed"), type=Path)
     ap.add_argument("--conf", type=float, default=0.25)
     ap.add_argument("--imgsz", type=int, default=1280)
     ap.add_argument("--save-vis", action="store_true", help="guardar overlays .png")
+    ap.add_argument("--labelstudio", action="store_true",
+                    help="además, exportar tareas de Label Studio (pre-anotaciones)", default=True)
+    ap.add_argument("--ls-out", type=Path, default=Path("Outputs/postprocessed"),
+                    help="carpeta para las tareas LS (por defecto: <out>/labelstudio)")
+    ap.add_argument("--url-prefix", default="",
+                    help="prefijo para data.image en LS (por defecto: solo el nombre del archivo)")
     args = ap.parse_args()
 
     args.out.mkdir(parents=True, exist_ok=True)
+    ls_out = None
+    if args.labelstudio:
+        ls_out = args.ls_out or (args.out / "labelstudio")
+        ls_out.mkdir(parents=True, exist_ok=True)
+
     from ultralytics import YOLO
     model = YOLO(str(args.weights))
 
@@ -136,18 +240,32 @@ def main():
     for res in results:
         n_imgs += 1
         stem = Path(res.path).stem
+        H, W = res.orig_shape                      # (alto, ancho) en píxeles
         instances = []
         if res.masks is not None:
             classes = res.boxes.cls.cpu().numpy().astype(int)
             for poly_xy, cls in zip(res.masks.xy, classes):   # masks.xy = polígonos en px
                 if len(poly_xy) >= 3:
                     instances.append(process_instance(int(cls), np.asarray(poly_xy)))
+        record = {
+            "image": Path(res.path).name,
+            "image_width": int(W),
+            "image_height": int(H),
+            "instances": instances,
+        }
         (args.out / f"{stem}.json").write_text(
-            json.dumps(instances, ensure_ascii=False, indent=2), encoding="utf-8")
-        img = cv2.imread(res.path)
-        if img is not None:
+            json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
+        if ls_out is not None:
+            task = record_to_labelstudio(record, args.url_prefix)
+            (ls_out / f"{stem}_ls.json").write_text(
+                json.dumps(task, ensure_ascii=False, indent=2), encoding="utf-8")
+        if args.save_vis:
+            img = cv2.imread(res.path)
+            if img is not None:
                 cv2.imwrite(str(args.out / f"{stem}.png"), draw_overlay(img, instances))
     print(f"[listo] {n_imgs} imagen(es) procesada(s) → {args.out.resolve()}")
+    if ls_out is not None:
+        print(f"[listo] tareas Label Studio → {ls_out.resolve()}")
 
 
 if __name__ == "__main__":
