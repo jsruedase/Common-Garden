@@ -11,23 +11,17 @@ Seeds a template from date 1, then for every later date:
      mark unmatched template nodes as absent.
 
 It scores against the ground-truth bed_position (never seen by the matcher) and
-renders two kinds of visual:
-  - a per-terrace GRID (one small panel per date, registered frame), and
-  - a per-image OVERLAY (one full-size figure per date) with the assigned id
-    drawn at each plant centroid, on the REAL photo when available, else on a
-    schematic canvas.
-Colours in both:  green = correct · red = wrong · blue = new (enrolled) ·
-grey x = template node absent this date.
+renders a per-terrace GRID plus per-image OVERLAYS.
+Colours: green = correct · red = wrong · blue = new (enrolled) · grey x = absent.
 
-This is Tier-1: detections are the ground-truth instances, so it measures the
-matcher + registration alone, independent of the segmentation model.
+TIER-1: las detecciones son las instancias del ground truth, así que esto mide el
+matcher + registro AISLADOS del segmentador. Con detecciones de YOLO (Tier-2)
+aparecen fallos y falsos positivos y las métricas bajan: no mezcles ambos números.
 
 Usage:
-    python matcher.py                       # all terrace_*.json here
-    python matcher.py terrace_1.json        # one terrace
-    python matcher.py /path/to/images       # a directory arg = real-image folder
-    python matcher.py terrace_7.json imgs/  # combine
-Figures are written to ./figs (grids) and ./figs/overlays (per-image overlays).
+    python matcher.py                       # all terrace_*.json
+    python matcher.py terrace_1.json imgs/  # one terrace + real images
+Figures -> Outputs/figs/matcher/ (grids) and Outputs/figs/matcher/overlays/
 """
 import glob
 import os
@@ -82,7 +76,6 @@ def run_terrace(frames):
     gate = 0.5 * nn_spacing(np.array(list(template.values())))
     new_ctr = 0
 
-    # each panel point: (true_id, pred_id, X_reg, Y_reg, x_orig, y_orig)
     panels = [dict(date=f1["date"], pts=[(i, i, x, y, x, y) for i, x, y in plants1], absent=[])]
     obs = [(i, i) for i, x, y in plants1]
 
@@ -133,6 +126,14 @@ def classify(true_id, pred_id, date1_ids):
 
 
 def idf1(obs):
+    """
+    IDF1 = 2*IDTP / (2*IDTP + IDFP + IDFN).
+    OJO (Tier-1): aquí cada detección es a la vez una observación del GT y una
+    predicción (biyección), así que IDFP = IDFN = total-IDTP y la fórmula se
+    reduce EXACTAMENTE a IDTP/total, es decir, a la exactitud de identidad.
+    Solo se separa de la exactitud en Tier-2, cuando hay detecciones perdidas o
+    espurias. No lo presentes como si midiera fragmentación aquí.
+    """
     from collections import Counter
     pair = Counter(obs)
     gts = sorted({t for t, _ in obs}); prs = sorted({p for _, p in obs})
@@ -198,6 +199,7 @@ def draw_terrace(res, terr, out_dir):
                  f"switches {m['switches']}   enrolled {m['enrolled']}   confused {m['confused']}", fontsize=12, y=0.998)
     _legend(fig)
     fig.tight_layout(rect=[0, 0.03, 1, 0.98])
+    os.makedirs(out_dir, exist_ok=True)
     out = os.path.join(out_dir, f"tracking_{terr}.png")
     fig.savefig(out, dpi=130); plt.close(fig)
     return out
@@ -222,11 +224,10 @@ def find_image(images_dir, terr, date):
 
 
 def overlay_one(pnl, terr, d1, image_path, out_path, is_template):
-    """One full-size overlay for a single date: assigned ids at real pixel
-    positions, on the photo if given, else on a schematic canvas."""
     pts = pnl["pts"]
     xs = [px[4] for px in pts]; ys = [px[5] for px in pts]
-
+    if not pts:
+        return
     if image_path:
         from PIL import Image
         img = Image.open(image_path); W, H = img.size
@@ -264,8 +265,9 @@ def overlay_one(pnl, terr, d1, image_path, out_path, is_template):
 
 
 def overlay_all(res, terr, frames, images_dir, out_dir):
-    """Separate function: render one overlay per date for a terrace."""
-    od = os.path.join(out_dir, "Outputs/overlays"); os.makedirs(od, exist_ok=True)
+    """Una superposición por fecha. (Arreglado: antes escribía en
+    <out_dir>/Outputs/overlays/, creando una carpeta 'Outputs' anidada.)"""
+    od = os.path.join(out_dir, "overlays"); os.makedirs(od, exist_ok=True)
     d1 = res["date1_ids"]; made = []
     seqs = [f["seq"] for f in sorted(frames, key=lambda f: f["seq"])]
     for idx, (seq, pnl) in enumerate(zip(seqs, res["panels"])):
@@ -297,8 +299,8 @@ def main():
         draw_terrace(res, terr, "Outputs/figs/matcher")
         for _, real in overlay_all(res, terr, frames, images_dir, "Outputs/figs/matcher"):
             n_real += real; n_schem += not real
-    print(f"\noverlays written to Outputs/figs/matcher/  ({n_real} on real images, {n_schem} schematic)")
-    print("grids written to Outputs/figs/matcher/")
+    print(f"\noverlays -> Outputs/figs/matcher/overlays/  ({n_real} on real images, {n_schem} schematic)")
+    print("grids    -> Outputs/figs/matcher/")
 
 
 if __name__ == "__main__":

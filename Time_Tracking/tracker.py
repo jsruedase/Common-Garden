@@ -4,34 +4,38 @@ JardínComún — Blended Tracker (geometry + frozen DINOv3 appearance)
 ==================================================================
 
 matcher.py's geometric pipeline with an appearance term in the assignment cost
-and a multi-view gallery per identity. It seeds identities from date 1 and
-propagates them forward exactly like matcher.py, then reuses matcher.py's OWN
-draw_terrace / overlay_all / score so the output is identical in form — grids,
-per-image overlays, IDF1 / switches — but driven by the blended cost.
+and a multi-view gallery per identity. Seeds identities from date 1 and
+propagates them forward exactly like matcher.py, reusing matcher.py's OWN
+draw_terrace / overlay_all / score, so output form is identical.
 
     cost(det,node) = alpha*(geom_dist/gate) + (1-alpha)*(1 - appearance_sim)
 
-Only pairs within a generous geometric gate are eligible, so a moved pot stays a
-candidate while a cross-terrace hub is excluded by position. alpha=1.0 reproduces
-matcher.py (geometry-only); the sweep finds the balance. Appearance is scored as
-the mean top-k cosine sim over each identity's accumulated (multi-view) gallery.
+alpha=1.0 reproduces matcher.py (geometry-only); the sweep finds the balance.
 
-Outputs, mirroring matcher.py:
-  Outputs/figs/tracking_<terr>.png            per-terrace grid (one panel/date)
-  Outputs/figs/Outputs/overlays/...           per-image overlays on the real photo
+SELECCIÓN DE ALPHA (importante para el artículo)
+------------------------------------------------
+Elegir el alpha que MAXIMIZA el IDF1 de la misma terraza que estás midiendo es
+seleccionar un hiperparámetro sobre la métrica que reportas: el "lift" sale
+optimista. Por eso:
+  --alpha-select loto  (por defecto)  alpha elegido por LEAVE-ONE-TERRACE-OUT:
+        para cada terraza se usa el mejor alpha PROMEDIO de las OTRAS terrazas.
+        Es el número honesto para publicar.
+  --alpha-select best  reproduce el comportamiento anterior (mejor alpha de la
+        propia terraza). Útil como COTA SUPERIOR, etiquétalo como tal.
+  --alpha-select fixed --alpha 0.4   alpha fijo para todas.
+
+Outputs:
+  Outputs/figs/tracker/tracking_<terr>.png    grid por terraza
+  Outputs/figs/tracker/overlays/...           superposiciones por imagen
   Outputs/figs/tracker/sweep_<terr>.png       IDF1 vs alpha
-The grid/overlays are rendered at the BEST alpha per terrace (or VIZ_ALPHA if set).
 
 Usage:
     python tracker.py Assets/annotations/terrace_1.json Assets/images
-    python tracker.py                       # all terrace_*.json + Assets/images
-
-Requires diagnostic.py, matcher.py, dinov3_probe.py on the path, plus
-torch/timm/pillow/scipy/matplotlib.
+    python tracker.py                       # todas las terrazas + Assets/images
 """
+import argparse
 import glob
 import os
-import sys
 
 import numpy as np
 from scipy.optimize import linear_sum_assignment
@@ -40,17 +44,19 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 from diagnostic import load_terrace, nn_spacing
-import matcher                         # reuse apply, icp, score, draw_terrace, overlay_all
-import ML as probe           # reuse build_embedder, crops_for_frame (monkeypatchable)
+import matcher                         # apply, icp, score, draw_terrace, overlay_all
 from matcher import PLANT, POT
+
+try:
+    import ML as probe                 # build_embedder, crops_for_frame
+except ImportError:                    # nombre alternativo del mismo módulo
+    import dinov3_probe as probe
 
 # ------------------------------- config ----------------------------------- #
 ALPHAS = [1.0, 0.8, 0.6, 0.4, 0.2, 0.0]   # 1.0 = geometry-only (matcher.py)
 GATE_FRAC = 1.2       # geometric gate as multiple of spacing (wider than matcher's 0.5)
 KNN = 5               # top-k over a node's gallery when scoring appearance
 GALLERY_CAP = 8       # max embeddings kept per identity
-USE_CSLS = True      # True for the dead/dormant terraces (ST7): demotes hub crops
-VIZ_ALPHA = None      # None = draw grids/overlays at the best alpha; or fix e.g. 0.2
 BIG = 1e6
 
 
@@ -60,7 +66,7 @@ def gallery_sim(det_emb, node_gal):
     D, N = len(det_emb), len(node_gal)
     S = np.zeros((D, N), np.float32)
     for j, G in enumerate(node_gal):
-        if len(G) == 0:
+        if G is None or len(G) == 0:
             continue
         sims = det_emb @ G.T
         k = min(KNN, sims.shape[1])
@@ -79,7 +85,7 @@ def csls(S, k=KNN):
 
 # ------------------------- prep (embed once) ------------------------------ #
 def prep_frames(frames, images_dir, embed):
-    """Per frame: ids, original xy, REGISTERED xy (P), pot centroids, embeddings.
+    """Per frame: ids, original xy, REGISTERED xy (P), embeddings.
     Registration is alpha-independent, so it (and embedding) is done once here."""
     frames = sorted(frames, key=lambda f: f["seq"])
     prepped = []
@@ -94,8 +100,11 @@ def prep_frames(frames, images_dir, embed):
             pots0 = pots
             P = xy.copy()
         else:
-            src = pots if len(pots) >= 3 else xy
-            dst = pots0 if len(pots0) >= 3 else prepped[0]["xy"]
+            # registrar SIEMPRE con la misma clase en origen y destino:
+            # si en alguno de los dos faltan materas, se usan plantas en ambos.
+            use_pots = len(pots) >= 3 and len(pots0) >= 3
+            src = pots if use_pots else xy
+            dst = pots0 if use_pots else prepped[0]["xy"]
             s, R, t = matcher.icp(src, dst)
             P = matcher.apply(s, R, t, xy) if len(xy) else xy
         prepped.append(dict(seq=f["seq"], date=f["date"], terrace=f["terrace"],
@@ -104,12 +113,13 @@ def prep_frames(frames, images_dir, embed):
 
 
 # ------------------------------- assignment ------------------------------- #
-def assign(prepped, alpha):
+def assign(prepped, alpha, use_csls=False):
     """Seed template from date 1, propagate forward. Returns matcher-format res."""
     f1 = prepped[0]
     if len(f1["ids"]) == 0 or len(f1["emb"]) == 0:
         return None
     gate = GATE_FRAC * nn_spacing(f1["xy"])
+    dim = f1["emb"].shape[1]          # dimensión del embedding (para galerías vacías)
 
     node_id = list(f1["ids"])
     node_pos = [f1["xy"][k].copy() for k in range(len(f1["ids"]))]
@@ -129,15 +139,16 @@ def assign(prepped, alpha):
                                absent=[(node_id[j], *node_pos[j]) for j in range(len(node_id))]))
             continue
 
-        n_pre = len(node_id)                                   # nodes existing before enrol
+        n_pre = len(node_id)
         T = np.array(node_pos)
         Dgeom = np.linalg.norm(P[:, None] - T[None], axis=2)
         within = Dgeom <= gate
 
-        use_app = alpha < 1.0 and len(emb) == len(ids) and len(emb)
+        has_emb = len(emb) == len(ids) and len(emb) > 0
+        use_app = alpha < 1.0 and has_emb
         if use_app:
             S = gallery_sim(emb, node_gal)
-            if USE_CSLS:
+            if use_csls:
                 S = csls(S)
             appcost = 1.0 - S
         else:
@@ -157,12 +168,15 @@ def assign(prepped, alpha):
                 new_ctr += 1
                 node_id.append(f"NEW{new_ctr}")
                 node_pos.append(P[k].copy())
-                node_gal.append(emb[k:k + 1].copy() if len(emb) == len(ids) else np.zeros((0, 0)))
+                # ARREGLO: la galería vacía debe tener la MISMA dimensión que los
+                # embeddings; con np.zeros((0,0)) el vstack posterior reventaba
+                # (ValueError) si ese nodo se emparejaba en una fecha con fotos.
+                node_gal.append(emb[k:k + 1].copy() if has_emb else np.zeros((0, dim), np.float32))
                 pid = node_id[-1]
             else:
                 pid = node_id[c]
                 node_pos[c] = P[k]
-                if len(emb) == len(ids):
+                if has_emb:
                     node_gal[c] = np.vstack([node_gal[c], emb[k:k + 1]])[-GALLERY_CAP:]
             seen.add(pid)
             pts.append((tid, pid, P[k][0], P[k][1], xy[k][0], xy[k][1]))
@@ -174,49 +188,77 @@ def assign(prepped, alpha):
 
 
 # ------------------------------- sweep plot ------------------------------- #
-def draw_sweep(terr, sweep, out_dir):
+def draw_sweep(terr, sweep, out_dir, chosen_alpha):
     a = [r["alpha"] for r in sweep]; f1 = [r["idf1"] for r in sweep]
     geom = next(r for r in sweep if r["alpha"] == 1.0)
+    ch = next(r for r in sweep if r["alpha"] == chosen_alpha)
     best = max(sweep, key=lambda r: r["idf1"])
     fig, ax = plt.subplots(figsize=(6.2, 4.0))
     ax.plot(a, f1, "-o", color="#4575b4")
-    ax.scatter([geom["alpha"]], [geom["idf1"]], color="#555", zorder=5, label=f"geometry-only {geom['idf1']:.2f}")
-    ax.scatter([best["alpha"]], [best["idf1"]], color="#1a9850", zorder=5, label=f"best α={best['alpha']} {best['idf1']:.2f}")
+    ax.scatter([geom["alpha"]], [geom["idf1"]], color="#555", zorder=5,
+               label=f"geometry-only {geom['idf1']:.2f}")
+    ax.scatter([ch["alpha"]], [ch["idf1"]], color="#1a9850", zorder=5,
+               label=f"elegido α={ch['alpha']} {ch['idf1']:.2f}")
+    if best["alpha"] != ch["alpha"]:
+        ax.scatter([best["alpha"]], [best["idf1"]], facecolors="none", edgecolors="#d73027",
+                   zorder=5, label=f"óptimo in-sample α={best['alpha']} (cota superior)")
     ax.set_xlabel("α   (1 = geometry-only → 0 = appearance-only)")
     ax.set_ylabel("IDF1"); ax.invert_xaxis()
-    ax.set_title(f"{terr}   blend lift {best['idf1'] - geom['idf1']:+.2f} IDF1")
-    ax.legend(frameon=False, fontsize=9); fig.tight_layout()
+    ax.set_title(f"{terr}   lift {ch['idf1'] - geom['idf1']:+.2f} IDF1")
+    ax.legend(frameon=False, fontsize=8); fig.tight_layout()
     os.makedirs(out_dir, exist_ok=True)
     out = os.path.join(out_dir, f"sweep_{terr}.png"); fig.savefig(out, dpi=130); plt.close(fig)
     return out
 
 
+def loto_alpha(all_sweeps, terr):
+    """Mejor alpha PROMEDIO sobre las demás terrazas (leave-one-terrace-out)."""
+    others = [s for t, s in all_sweeps.items() if t != terr]
+    if not others:
+        return 1.0
+    means = {}
+    for a in ALPHAS:
+        vals = [next((r["idf1"] for r in s if r["alpha"] == a), None) for s in others]
+        vals = [v for v in vals if v is not None]
+        if vals:
+            means[a] = float(np.mean(vals))
+    return max(means, key=means.get) if means else 1.0
+
+
 # --------------------------------- main ----------------------------------- #
 def main():
-    args = sys.argv[1:]
-    images_dir = next((a for a in args if os.path.isdir(a)), "Assets/images")
-    paths = [a for a in args if a.endswith(".json")] or sorted(glob.glob("Assets/annotations/terrace_*.json"))
+    ap = argparse.ArgumentParser(description="Tracker geometría+apariencia (DINOv3)")
+    ap.add_argument("paths", nargs="*", help="terrace_*.json y/o carpeta de imágenes")
+    ap.add_argument("--alpha-select", choices=["loto", "best", "fixed"], default="loto",
+                    help="loto = honesto (por defecto); best = cota superior; fixed = --alpha")
+    ap.add_argument("--alpha", type=float, default=0.4, help="alpha si --alpha-select fixed")
+    ap.add_argument("--csls", action="store_true",
+                    help="normalización CSLS (útil en terrazas con crops muy parecidos, p.ej. ST7)")
+    args = ap.parse_args()
+
+    images_dir = next((a for a in args.paths if os.path.isdir(a)), "Assets/images")
+    paths = [a for a in args.paths if a.endswith(".json")] or sorted(
+        glob.glob("Assets/annotations/terrace_*.json"))
     if not paths:
-        print("No terrace_*.json found."); sys.exit(1)
+        print("No terrace_*.json found."); return
 
     embed = probe.build_embedder()
     os.makedirs("Outputs/figs/tracker", exist_ok=True)
     print(f"\n{'terrace':8s} {'α':>4s} {'IDF1':>6s} {'core':>6s} {'switch':>7s} {'conf':>5s} {'enrl':>5s}")
 
-    lifts = []
+    sweeps, keep = {}, {}
     for p in paths:
         frames = load_terrace(p)
         if len(frames) < 2:
             continue
-        prepped = prep_frames(frames, images_dir, embed)     # embed ONCE, reuse across α
+        prepped = prep_frames(frames, images_dir, embed)   # embed ONCE, reuse across α
         terr = prepped[0]["terrace"]
-
         sweep = []
         for a in ALPHAS:
-            res = assign(prepped, a)
+            res = assign(prepped, a, use_csls=args.csls)
             if res is None:
                 break
-            m = matcher.score(res)                            # matcher.py's OWN scoring
+            m = matcher.score(res)
             sweep.append(dict(alpha=a, res=res, **m))
             print(f"{terr:8s} {a:4.1f} {m['idf1']:6.2f} {m['core_acc']:6.0%} "
                   f"{m['switches']:7d} {m['confused']:5d} {m['enrolled']:5d}"
@@ -224,26 +266,36 @@ def main():
         if not sweep:
             print(f"{terr:8s}  (skipped — no crops/photos on date 1)")
             continue
+        sweeps[terr] = sweep
+        keep[terr] = (frames, sweep)
 
-        # choose alpha for the visuals and render with matcher.py's own functions
-        chosen = (next(r for r in sweep if r["alpha"] == VIZ_ALPHA) if VIZ_ALPHA is not None
-                  else max(sweep, key=lambda r: r["idf1"]))
-        matcher.draw_terrace(chosen["res"], terr, "Outputs/figs/tracker")                     # grid
-        matcher.overlay_all(chosen["res"], terr, frames, images_dir, "Outputs/figs/tracker")  # overlays
-        draw_sweep(terr, sweep, "Outputs/figs/tracker")
-
+    # ---- elegir alpha y renderizar ----
+    lifts = []
+    for terr, (frames, sweep) in keep.items():
+        if args.alpha_select == "best":
+            a_sel = max(sweep, key=lambda r: r["idf1"])["alpha"]
+        elif args.alpha_select == "fixed":
+            a_sel = min(ALPHAS, key=lambda a: abs(a - args.alpha))
+        else:
+            a_sel = loto_alpha(sweeps, terr)
+        chosen = next(r for r in sweep if r["alpha"] == a_sel)
+        matcher.draw_terrace(chosen["res"], terr, "Outputs/figs/tracker")
+        matcher.overlay_all(chosen["res"], terr, frames, images_dir, "Outputs/figs/tracker")
+        draw_sweep(terr, sweep, "Outputs/figs/tracker", a_sel)
         geom = next(r for r in sweep if r["alpha"] == 1.0)
-        lifts.append((terr, geom["idf1"], chosen["idf1"], chosen["alpha"]))
-        print(f"         -> visuals drawn at α={chosen['alpha']}  (IDF1 {chosen['idf1']:.2f})\n")
+        lifts.append((terr, geom["idf1"], chosen["idf1"], a_sel))
 
     if lifts:
-        print(f"{'terrace':8s} {'geom':>6s} {'viz':>6s} {'α':>4s} {'lift':>6s}")
+        print(f"\nselección de α: {args.alpha_select}"
+              + ("  (honesto, leave-one-terrace-out)" if args.alpha_select == "loto"
+                 else "  (COTA SUPERIOR: α elegido sobre la misma terraza)" if args.alpha_select == "best"
+                 else ""))
+        print(f"{'terrace':8s} {'geom':>6s} {'sel':>6s} {'α':>4s} {'lift':>6s}")
         for terr, g, b, a in lifts:
             print(f"{terr:8s} {g:6.2f} {b:6.2f} {a:4.1f} {b - g:+6.2f}")
         gm = np.mean([g for _, g, _, _ in lifts]); bm = np.mean([b for _, _, b, _ in lifts])
         print(f"{'MEAN':8s} {gm:6.2f} {bm:6.2f} {'':4s} {bm - gm:+6.2f}")
-        print("\ngrids -> Outputs/figs/tracker/   overlays -> Outputs/figs/tracker/overlays/")
-        print("sweeps -> Outputs/figs/tracker/")
+        print("\ngrids/overlays/sweeps -> Outputs/figs/tracker/")
 
 
 if __name__ == "__main__":

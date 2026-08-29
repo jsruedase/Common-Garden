@@ -1,6 +1,5 @@
 Segmentation_Model/datasets
-Outputs/figs
-Outputs/postprocessed
+Outputs
 Colab_results
 __pycache__/
 datasets
