@@ -4,3 +4,5 @@ Colab_results
 __pycache__/
 datasets
 .venv
+CLAUDE.md
+Paper/images
