@@ -53,6 +53,27 @@ el segmentador detectó. Las fechas siguientes llegan al tracker sin identidad.
 **El sorteo de la planta se condiciona solo al tier-1.** Elegirla entre las que el
 segmentador sigue bien maquillaría el tier-2 de la propia figura.
 
+## Terrazas sin anotación (ST6, ST8)
+
+```bash
+C:\Python314\python.exe Paper/highlight_track.py --terrace ST6
+```
+
+ST6 y ST8 tienen fotos pero **no** tienen `terrace_N.json`. Es el caso real puro, y
+funciona, con tres diferencias que la figura declara en la cartela:
+
+- **solo tier-2** — no hay formas anotadas que dibujar, así que no existe la fila
+  de referencia; pedir `--tiers tier1` sobre una de estas terrazas es un error;
+- **los ids se inventan** — sin biólogo que ponga `bed_position`, las plantas de la
+  primera fecha se numeran `P01..Pnn` en orden de lectura (filas de arriba abajo,
+  y de izquierda a derecha dentro de cada fila). Son etiquetas **arbitrarias**;
+- **no hay aciertos que reportar** — sin verdad con la que contrastar, cada fecha
+  solo puede decir `SEGUIDA` o `SIN MATCH`, nunca `SEGUIMIENTO OK` ni `ERROR DE ID`,
+  y `accuracy` sale `null` en `summary.json`.
+
+Dicho de otro modo: sirve para **enseñar** el seguimiento sobre datos nuevos, no para
+medirlo. Para medir hace falta una terraza anotada (1-5, 7).
+
 ## Salida
 
 ```

@@ -101,10 +101,11 @@ def coverage(frames: list) -> tuple:
     return out, len(ordered) - 1
 
 
-def _status(step, first: bool) -> tuple:
+def _status(step, first: bool, annotated: bool = True) -> tuple:
     """(texto de estado, aviso rojo o None) para la cartela."""
     if first:
-        return "SEMBRADA (id anotado por el biologo)", None
+        return ("SEMBRADA (id anotado por el biologo)" if annotated else
+                "SEMBRADA (id arbitrario: terraza sin anotacion)"), None
     if step["plant_key"] is None:
         return "SIN MATCH", "El tracker no asigno este id en esta fecha"
     if step["correct"] is True:
@@ -113,13 +114,14 @@ def _status(step, first: bool) -> tuple:
         real = step["truth"]
         return (f"ERROR DE ID (en realidad es {real})",
                 f"El tracker confundio la identidad: esta planta es {real}")
-    return "SEGUIDA (deteccion sin anotacion pareja)", None
+    return "SEGUIDA (sin anotacion que contrastar)", None
 
 
 # ---------------------------------------------------------------------------
 # Dibujo de una fecha
 # ---------------------------------------------------------------------------
-def render_step(step, target, tier, idx, n_dates, max_width, with_header=True):
+def render_step(step, target, tier, idx, n_dates, max_width, with_header=True,
+                annotated=True):
     """
     Compone una fecha. `with_header=False` da la version limpia (sin cartela ni
     franja) que se usa en las tiras, donde el titulo ya lo pone matplotlib.
@@ -135,7 +137,7 @@ def render_step(step, target, tier, idx, n_dates, max_width, with_header=True):
     tgt = [f["shapes"][k] for k in keys if k in f["shapes"]]
     others = [s for k, s in f["shapes"].items() if k not in keys]
 
-    status, warning = _status(step, idx == 0)
+    status, warning = _status(step, idx == 0, annotated)
     header = [
         f"{f['terrace']}   fecha {idx + 1}/{n_dates}   {f['date'].replace('_', ' ')}",
         f"planta seguida: {target}",
@@ -148,7 +150,7 @@ def render_step(step, target, tier, idx, n_dates, max_width, with_header=True):
                             max_width=max_width)
 
 
-def run_tier(tier, frames, target, out_root, max_width, log=print):
+def run_tier(tier, frames, target, out_root, max_width, log=print, annotated=True):
     steps = follow(frames, target)
     tier_dir = out_root / TIERS[tier]
     tier_dir.mkdir(parents=True, exist_ok=True)
@@ -156,8 +158,9 @@ def run_tier(tier, frames, target, out_root, max_width, log=print):
     cells, records = [], []
     for idx, step in enumerate(steps):
         f = step["frame"]
-        img = render_step(step, target, tier, idx, len(steps), max_width)
-        status, _ = _status(step, idx == 0)
+        img = render_step(step, target, tier, idx, len(steps), max_width,
+                          annotated=annotated)
+        status, _ = _status(step, idx == 0, annotated)
         rec = dict(seq=f["seq"], date=f["date"], status=status,
                    matched=step["plant_key"] is not None,
                    ground_truth=step["truth"], correct=step["correct"],
@@ -171,7 +174,7 @@ def run_tier(tier, frames, target, out_root, max_width, log=print):
         rec["image"] = f"{TIERS[tier]}/{name}"
         records.append(rec)
         clean = render_step(step, target, tier, idx, len(steps), 900,
-                            with_header=False)
+                            with_header=False, annotated=annotated)
         cells.append((clean if clean is not None else img,
                       f"{f['date'].replace('_', ' ')}\n{status}"))
         log(f"  [{tier}] {f['date']:24s} {status}")
@@ -221,17 +224,33 @@ def main():
     if not files:
         raise SystemExit(f"[error] no hay terrace_*.json en {args.annotations.resolve()}")
 
+    picked = None
     if args.terrace:
         want = str(args.terrace).lower().replace("st", "").replace(".json", "").strip("_")
         picked = next((f for f in files if f.stem.split("_")[-1] == want), None)
-        if picked is None:
-            raise SystemExit(f"[error] terraza {args.terrace!r} no esta en "
-                             f"{[f.stem for f in files]}")
     else:
         picked = rng.choice(files)
-    print(f"[terraza] {picked.name}")
 
-    gt_frames = D.load_tier1(picked, args.images)
+    # Una terraza SIN export (ST6, ST8) es el caso real puro: no hay ground truth,
+    # asi que no hay tier-1 que dibujar ni aciertos que reportar. Se sigue igual,
+    # con ids inventados en la fecha 1.
+    annotated = picked is not None
+    if annotated:
+        print(f"[terraza] {picked.name}")
+        gt_frames = D.load_tier1(picked, args.images)
+    else:
+        label = f"ST{want}"
+        gt_frames = D.frames_from_images(args.images, label)
+        if not gt_frames:
+            raise SystemExit(f"[error] terraza {args.terrace!r}: ni export en "
+                             f"{args.annotations} ni fotos en {args.images}")
+        print(f"[terraza] {label} SIN anotacion: {len(gt_frames)} fotos, solo tier-2, "
+              f"ids inventados y sin verdad con la que contrastar")
+        if "tier2" not in tiers:
+            raise SystemExit("[error] una terraza sin anotacion solo admite --tiers tier2 "
+                             "(no hay formas anotadas que dibujar).")
+        tiers = ["tier2"]
+
     if len(gt_frames) < 2:
         raise SystemExit("[error] se necesitan al menos 2 fechas para seguir una planta.")
     print(f"[fechas]  {len(gt_frames)}: " + ", ".join(f["date"] for f in gt_frames))
@@ -239,12 +258,16 @@ def main():
     if missing:
         print(f"[aviso]   sin foto en {args.images}: {missing}")
 
-    built = {"tier1": gt_frames}
+    built = {"tier1": gt_frames} if annotated else {}
     if "tier2" in tiers:
         try:
             built["tier2"] = D.load_tier2(gt_frames, args.images, args.weights,
-                                          conf=args.conf, imgsz=args.imgsz)
+                                          conf=args.conf, imgsz=args.imgsz,
+                                          seed_from_gt=annotated)
         except Exception as e:
+            if not annotated:
+                raise SystemExit(f"[error] sin anotacion el tier-2 es la unica via, "
+                                 f"y fallo: {type(e).__name__}: {e}")
             print(f"[aviso]   tier-2 desactivado: {type(e).__name__}: {e}")
             tiers = [t for t in tiers if t != "tier2"]
 
@@ -282,12 +305,14 @@ def main():
     results, rows, row_titles = {}, [], []
     for tier in tiers:
         print(f"[{tier}]")
-        r = run_tier(tier, built[tier], target, out_root, args.max_width)
+        r = run_tier(tier, built[tier], target, out_root, args.max_width,
+                     annotated=annotated)
         results[tier] = r
         if r["cells"]:
             rows.append(r["cells"])
-            acc = "n/d" if r["accuracy"] is None else f"{r['accuracy']:.0%}"
-            row_titles.append(f"{TIER_TITLE[tier]}\naciertos {acc}")
+            acc = ("sin verdad que contrastar" if r["accuracy"] is None
+                   else f"aciertos {r['accuracy']:.0%}")
+            row_titles.append(f"{TIER_TITLE[tier]}\n{acc}")
 
     if not args.no_strip and rows:
         title = (f"{gt_frames[0]['terrace']} - seguimiento de la planta {target} "
@@ -299,7 +324,8 @@ def main():
             render.strip(rows, out_root / "compare.png", title, row_titles=row_titles)
 
     summary = dict(
-        terrace=gt_frames[0]["terrace"], annotations=picked.name, plant=target,
+        terrace=gt_frames[0]["terrace"],
+        annotations=picked.name if annotated else None, plant=target,
         seed=args.seed, n_dates=len(gt_frames), candidates=common,
         tiers={t: dict(accuracy=results[t]["accuracy"],
                        matched=f"{results[t]['n_matched']}/{results[t]['n_later']}",

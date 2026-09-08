@@ -212,11 +212,11 @@ def record_to_labelstudio(record: dict, url_prefix: str = "") -> dict:
 def main():
     ap = argparse.ArgumentParser(description="Convexos (plantas) + elipses (materas)")
     ap.add_argument("--weights", default=Path("Segmentation_Model/best.pt"), type=Path)
-    ap.add_argument("--source", default=Path("Assets/images/5-ST8_Nov_24-28_2025.JPG"), type=Path, help="imagen o carpeta de imágenes")
+    ap.add_argument("--source", default=Path("Assets/images/1-ST1_Sep_1-5_2025.JPG"), type=Path, help="imagen o carpeta de imágenes")
     ap.add_argument("--out", default=Path("Outputs/postprocessed"), type=Path)
     ap.add_argument("--conf", type=float, default=0.25)
     ap.add_argument("--imgsz", type=int, default=1280)
-    ap.add_argument("--save-vis", action="store_true", help="guardar overlays .png")
+    ap.add_argument("--save-vis", action="store_true", help="guardar overlays .png", default=True)
     ap.add_argument("--labelstudio", action="store_true",
                     help="además, exportar tareas de Label Studio (pre-anotaciones)", default=True)
     ap.add_argument("--ls-out", type=Path, default=Path("Outputs/postprocessed"),

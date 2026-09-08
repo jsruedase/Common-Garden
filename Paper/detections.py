@@ -37,6 +37,7 @@ Este modulo no escribe nada fuera de Paper/ y no importa nada de App/.
 """
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 
@@ -152,6 +153,32 @@ def load_tier1(ann_path, images_dir=DEFAULT_IMAGES) -> list:
 
 
 # ---------------------------------------------------------------------------
+# Terrazas SIN anotacion (p.ej. ST6/ST8): la secuencia sale de los nombres
+# ---------------------------------------------------------------------------
+FNAME_RE = re.compile(r"^(?P<seq>\d+)-ST(?P<terrace>\d+)_(?P<date>.+)\.(jpe?g|png)$", re.I)
+
+
+def frames_from_images(images_dir, terrace: str) -> list:
+    """
+    Frames "vacios" (solo foto, fecha y orden) para una terraza sin export de
+    Label Studio. Es el unico camino para ST6/ST8, que tienen fotos pero no
+    ground truth: el orden temporal sale del prefijo <seq> del nombre, la misma
+    clave que usa el resto del repo.
+    """
+    want = str(terrace).upper().replace("ST", "").strip()
+    out = []
+    for f in sorted(Path(images_dir).iterdir()):
+        m = FNAME_RE.match(f.name)
+        if not m or m.group("terrace") != want:
+            continue
+        out.append(dict(seq=int(m.group("seq")), date=m.group("date"),
+                        terrace=f"ST{m.group('terrace')}", image=str(f),
+                        dets=[], shapes={}, gt={}, width=0, height=0))
+    out.sort(key=lambda f: f["seq"])
+    return out
+
+
+# ---------------------------------------------------------------------------
 # TIER-2 — formas del segmentador YOLO
 # ---------------------------------------------------------------------------
 def _shape_from_instance(inst: dict):
@@ -206,8 +233,45 @@ def _rename_plants(frame: dict, mapping: dict) -> None:
                        for (c, i), s in frame["shapes"].items()}
 
 
+def _reading_order(pts: np.ndarray) -> list:
+    """Indices en orden de lectura: por filas (banda en y) y, dentro, de izquierda a derecha."""
+    if len(pts) == 0:
+        return []
+    band = diagnostic.nn_spacing(pts)
+    band = 0.6 * band if np.isfinite(band) and band > 0 else float("inf")
+    rows, cur = [], None
+    for i in np.argsort(pts[:, 1]):
+        if cur is None or pts[i, 1] - pts[cur[0], 1] <= band:
+            cur = [i] if cur is None else cur + [i]
+        else:
+            rows.append(cur)
+            cur = [i]
+    rows.append(cur)
+    return [int(i) for r in rows for i in sorted(r, key=lambda k: pts[k, 0])]
+
+
+def seed_synthetic(frame: dict, prefix: str = "P") -> dict:
+    """
+    Bautiza las plantas de la primera fecha cuando NO hay anotacion (ST6/ST8).
+
+    Sin biologo que ponga bed_position, los identificadores tienen que salir de
+    algun lado: se numeran P01..Pnn en orden de lectura (filas de arriba abajo,
+    y de izquierda a derecha dentro de cada fila). Son etiquetas ARBITRARIAS —
+    no son bed_position y no se pueden contrastar con nada.
+    """
+    plants = _plants(frame)
+    if not plants:
+        return {}
+    pts = np.array([[x, y] for _, x, y in plants], float)
+    mapping = {plants[k][0]: f"{prefix}{n + 1:02d}"
+               for n, k in enumerate(_reading_order(pts))}
+    _rename_plants(frame, mapping)
+    return mapping
+
+
 def load_tier2(gt_frames: list, images_dir=DEFAULT_IMAGES, weights=DEFAULT_WEIGHTS,
-               conf: float = 0.25, imgsz: int = 1280, log=print) -> list:
+               conf: float = 0.25, imgsz: int = 1280, log=print,
+               seed_from_gt: bool = True) -> list:
     """
     Corre el segmentador entrenado sobre las MISMAS fechas que `gt_frames` y
     devuelve frames enriquecidos con las formas post-procesadas.
@@ -253,7 +317,16 @@ def load_tier2(gt_frames: list, images_dir=DEFAULT_IMAGES, weights=DEFAULT_WEIGH
                            image=gf["image"]))
 
     frames.sort(key=lambda f: f["seq"])
-    by_seq = {f["seq"]: f for f in gt_frames}
+    by_seq = {f["seq"]: f for f in gt_frames}   # solo se usa si seed_from_gt
+
+    n_pl0 = sum(1 for c, *_ in frames[0]["dets"] if c == PLANT)
+
+    if not seed_from_gt:
+        # terraza sin anotacion: los ids se inventan y NO hay verdad que contrastar
+        seed = seed_synthetic(frames[0])
+        log(f"[tier2] fecha 1: {len(seed)}/{n_pl0} plantas numeradas P01..P{len(seed):02d} "
+            f"(ids arbitrarios: no hay bed_position)")
+        return frames
 
     # fecha 1: el biologo pone los ids sobre lo que el segmentador detecto
     seed = match_to_gt(frames[0], by_seq[frames[0]["seq"]])
@@ -261,7 +334,6 @@ def load_tier2(gt_frames: list, images_dir=DEFAULT_IMAGES, weights=DEFAULT_WEIGH
     seeded = set(seed.values())
     frames[0]["gt"] = {(c, i): (str(i) if c == PLANT and str(i) in seeded else None)
                        for c, i, _, _ in frames[0]["dets"]}
-    n_pl0 = sum(1 for c, *_ in frames[0]["dets"] if c == PLANT)
     log(f"[tier2] fecha 1: {len(seed)}/{n_pl0} plantas detectadas recibieron bed_position")
 
     # fechas siguientes: la verdad se guarda SOLO para reportar aciertos
@@ -274,10 +346,18 @@ def load_tier2(gt_frames: list, images_dir=DEFAULT_IMAGES, weights=DEFAULT_WEIGH
 # ---------------------------------------------------------------------------
 # Utilidades comunes
 # ---------------------------------------------------------------------------
+_PROVISIONAL = re.compile(r"^(\?|d\d+$)")
+
+
 def seed_candidates(frames: list) -> list:
-    """bed_position de la primera fecha que sirven como planta a seguir."""
+    """
+    Identidades de la primera fecha que sirven como planta a seguir: las que
+    quedaron SEMBRADAS. Se descartan las provisionales — "?<region>" (region sin
+    bed_position en el export) y "d<k>" (deteccion de YOLO que no caso con
+    ninguna planta anotada). Los ids sinteticos "P01..." si valen.
+    """
     return sorted({str(i) for c, i, _, _ in frames[0]["dets"]
-                   if c == PLANT and frames[0]["gt"].get((c, i))})
+                   if c == PLANT and not _PROVISIONAL.match(str(i))})
 
 
 def terrace_files(ann_dir=DEFAULT_ANNOTATIONS) -> list:
