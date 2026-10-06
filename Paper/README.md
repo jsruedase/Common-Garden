@@ -137,7 +137,14 @@ python Paper/pipeline_terrace.py --images Assets/images/ST6
 | 1 segmentar | YOLO-seg `best.pt` + postproceso (casco convexo / elipse) | `01_segmentacion/` |
 | 2 sembrar | la fecha 1 recibe los `bed_position` del export anotado, emparejando por centroide; lo que el export no respalda queda como `?1..?n` | — |
 | 3 propagar | ICP sobre materas + Hungarian sobre plantas, el **mismo** codigo de la app | `02_tracking/` |
-| 4 dibujar | `annotate_export.py` sobre cada fecha | `03_figuras/` + `<ST>_pipeline.png` |
+| 4 dibujar | `annotate_export.py` sobre cada fecha | `03_figuras/` + dos figuras |
+
+Salen **dos figuras con el mismo material**, porque hacen cosas distintas:
+`<ST>_pipeline.png` es la rejilla, donde los identificadores se **leen**;
+`<ST>_pipeline_cascada.png` es la baraja de fechas, que se **mira** y dice "serie
+temporal" de un vistazo (el color del borde codifica el orden, y la ultima fecha
+queda al frente y completa). La cascada abre el articulo; la rejilla es la que se
+revisa.
 
 **Label Studio es el formato de intercambio entre pasos**, no un adorno: cada etapa
 escribe un JSON que se puede abrir, revisar o reimportar, y la siguiente lo lee. Si

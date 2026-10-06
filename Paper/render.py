@@ -257,3 +257,115 @@ def strip(rows, out_path, suptitle, row_titles=None, cell=520, dpi=160):
     fig.savefig(str(out_path), dpi=dpi, facecolor="white")
     plt.close(fig)
     return out_path
+
+
+# ---------------------------------------------------------------------------
+# Cascada: las fechas como una baraja de fotos, para abrir el articulo
+# ---------------------------------------------------------------------------
+def _ramp(n: int):
+    """n colores BGR de frio a calido: el borde codifica el orden temporal."""
+    import matplotlib.cm as cm
+    import numpy as _np
+    cols = cm.get_cmap("plasma")(_np.linspace(0.08, 0.88, max(n, 2)))[:n]
+    return [(int(b * 255), int(g * 255), int(r * 255)) for r, g, b, _a in cols]
+
+
+def _frame_card(img, frame, border, edge_px, edge=(178, 178, 178)):
+    """
+    Foto -> tarjeta BGRA: marco (blanco por defecto) y un filete gris finito.
+
+    El filete no es decorativo: sobre fondo blanco, dos tarjetas blancas
+    superpuestas se funden en una mancha y hay que poder ver donde acaba cada una.
+    """
+    card = cv2.copyMakeBorder(img, border, border, border, border,
+                              cv2.BORDER_CONSTANT, value=frame)
+    card = cv2.copyMakeBorder(card, edge_px, edge_px, edge_px, edge_px,
+                              cv2.BORDER_CONSTANT, value=edge)
+    out = cv2.cvtColor(card, cv2.COLOR_BGR2BGRA)
+    out[:, :, 3] = 255
+    return out
+
+
+def _rotate_bgra(card, angle):
+    h, w = card.shape[:2]
+    M = cv2.getRotationMatrix2D((w / 2, h / 2), angle, 1.0)
+    cos, sin = abs(M[0, 0]), abs(M[0, 1])
+    nw, nh = int(h * sin + w * cos), int(h * cos + w * sin)
+    M[0, 2] += nw / 2 - w / 2
+    M[1, 2] += nh / 2 - h / 2
+    return cv2.warpAffine(card, M, (nw, nh), flags=cv2.INTER_CUBIC,
+                          borderMode=cv2.BORDER_CONSTANT, borderValue=(0, 0, 0, 0))
+
+
+def _paste(canvas, card, x, y):
+    h, w = card.shape[:2]
+    H, W = canvas.shape[:2]
+    x, y = max(0, x), max(0, y)
+    w, h = min(w, W - x), min(h, H - y)
+    if w <= 0 or h <= 0:
+        return
+    src, dst = card[:h, :w], canvas[y:y + h, x:x + w]
+    a = (src[:, :, 3:4].astype(np.float32) / 255.0)
+    dst[:, :, :3] = (src[:, :, :3] * a + dst[:, :, :3] * (1 - a)).astype(np.uint8)
+    dst[:, :, 3] = np.maximum(dst[:, :, 3], src[:, :, 3])
+
+
+def cascade(cells, out_path, card_w=1150, border=26, mat=3, span=0.0,
+            overlap=0.80, shadow=True, colours=None, drop=0.0):
+    """
+    Monta las fechas como una baraja abierta: cada foto con su borde de color,
+    girada un poco y solapando a la anterior. La ultima queda al frente y
+    completa; de las demas se ve la franja izquierda, que es donde va la fecha.
+
+    Pensado como figura de apertura: transmite "serie temporal" de un vistazo.
+    Para LEER los identificadores esta la rejilla (strip), no esta.
+
+    cells    [(imagen_bgr, etiqueta), ...] en orden cronologico
+    span     grados de abanico; 0 = tarjetas rectas
+    drop     desplazamiento vertical entre tarjetas, en alturas de tarjeta;
+             0 = todas sobre la misma linea, con las fechas alineadas
+    colours  marco de cada tarjeta; None = blanco (sobrio, para articulo).
+             _ramp(n) da un degradado que codifica el orden, si se quiere.
+    """
+    n = len(cells)
+    if not n:
+        return None
+    colours = colours or [(255, 255, 255)] * n
+    k = card_w / 2000.0
+    angles = np.linspace(-span, 0.0, n) if span else np.zeros(n)
+
+    cards = []
+    for (img, label), colour, ang in zip(cells, colours, angles):
+        im = cv2.resize(img, (card_w, int(card_w * img.shape[0] / img.shape[1])),
+                        interpolation=cv2.INTER_AREA)
+        if label:
+            _text_box(im, (int(26 * k), im.shape[0] - int(96 * k)), [label], k, scale=1.45)
+        cards.append(_rotate_bgra(_frame_card(im, colour, border, mat), ang))
+
+    step_x = int(cards[0].shape[1] * (1.0 - overlap))
+    step_y = int(cards[0].shape[0] * drop)
+    pad = int(60 * k) + (int(26 * k) if shadow else 0)
+    W = step_x * (n - 1) + max(c.shape[1] for c in cards) + 2 * pad
+    H = step_y * (n - 1) + max(c.shape[0] for c in cards) + 2 * pad
+    canvas = np.zeros((H, W, 4), np.uint8)
+
+    for i, card in enumerate(cards):
+        x, y = pad + i * step_x, pad + i * step_y
+        if shadow:
+            sh = np.zeros_like(card)
+            sh[:, :, 3] = cv2.GaussianBlur(card[:, :, 3], (0, 0), 9 * k)
+            _paste(canvas, sh, x + int(10 * k), y + int(12 * k))
+        _paste(canvas, card, x, y)
+
+    ys, xs = np.where(canvas[:, :, 3] > 0)
+    if len(xs):
+        m = int(26 * k)
+        y0, y1 = max(0, ys.min() - m), min(H, ys.max() + m + 1)
+        x0, x1 = max(0, xs.min() - m), min(W, xs.max() + m + 1)
+        canvas = canvas[y0:y1, x0:x1]
+
+    out = np.full(canvas.shape[:2] + (3,), 255, np.uint8)
+    a = canvas[:, :, 3:4].astype(np.float32) / 255.0
+    out = (canvas[:, :, :3] * a + out * (1 - a)).astype(np.uint8)
+    cv2.imwrite(str(out_path), out)
+    return out_path

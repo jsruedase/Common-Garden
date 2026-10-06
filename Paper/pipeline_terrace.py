@@ -327,10 +327,13 @@ def main():
     cells = draw(tracked, args.images, fig_dir, args)
 
     if not args.no_strip and cells:
+        # dos figuras con el mismo material: la rejilla se LEE (los ids son
+        # legibles), la cascada se MIRA (abre el articulo y dice "serie temporal")
         rows = [cells[i:i + 4] for i in range(0, len(cells), 4)]
         render.strip(rows, out_root / f"{terr}_pipeline.png",
                      f"{terr} - pipeline completo: segmentacion YOLO + propagacion de "
                      f"identidades   (siembra: {seeding})")
+        render.cascade(cells, out_root / f"{terr}_pipeline_cascada.png")
 
     summary = dict(terrace=terr, photos=len(photos), seeding=seeding, seeded=n_seeded,
                    dates=[dict(seq=f["seq"], date=f["date"], **s) for f, _t, s in tracked])
@@ -342,7 +345,8 @@ def main():
     print("        02_tracking/      tareas LS con los ids propagados (reimportables)")
     print("        03_figuras/       una imagen por fecha")
     if not args.no_strip:
-        print(f"        {terr}_pipeline.png   la rejilla para el articulo")
+        print(f"        {terr}_pipeline.png           rejilla legible")
+        print(f"        {terr}_pipeline_cascada.png   cascada de apertura")
     print("\n[ojo]   terraza sin ground truth: la figura muestra lo que el pipeline")
     print("        DECIDIO, no si acerto. Para medir hace falta una terraza anotada.")
 
