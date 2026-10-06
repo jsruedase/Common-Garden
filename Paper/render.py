@@ -48,6 +48,18 @@ def draw_shape(img, shape, color, thickness):
                     shape["rot"], 0, 360, color, thickness, cv2.LINE_AA)
 
 
+def fill_shape(img, shape, color):
+    """Rellena la forma (sin borde). Pensado para componerse con addWeighted."""
+    if shape["kind"] == "polygon":
+        pts = np.asarray(shape["points"], np.int32).reshape(-1, 1, 2)
+        cv2.fillPoly(img, [pts], color, cv2.LINE_AA)
+    else:
+        cv2.ellipse(img,
+                    (int(round(shape["cx"])), int(round(shape["cy"]))),
+                    (max(1, int(round(shape["rx"]))), max(1, int(round(shape["ry"])))),
+                    shape["rot"], 0, 360, color, -1, cv2.LINE_AA)
+
+
 def _text_box(img, org, lines, k, scale=1.0, fg=WHITE, bg=INK, alpha=0.72):
     """Caja de texto semitransparente anclada arriba-izquierda en `org`."""
     if not lines:
@@ -205,7 +217,7 @@ def strip(rows, out_path, suptitle, row_titles=None, cell=520, dpi=160):
         nrows, ncols = n_tier, n_date
         cellof = lambda i, j: at(i, j)
 
-    title_h = 42                                       # px reservados por celda
+    title_h = 64                                       # px reservados por celda
     # cabecera: el suptitulo siempre, y ademas las etiquetas de tier cuando estas
     # van arriba (caso apaisado). Se reserva en pulgadas y se descuenta del rect.
     header = 0.82 if (wide and row_titles) else 0.45
@@ -228,7 +240,7 @@ def strip(rows, out_path, suptitle, row_titles=None, cell=520, dpi=160):
             ax.set_title(title, fontsize=8, pad=3, linespacing=1.25)
 
     fig.suptitle(suptitle, fontsize=11, y=1 - 0.16 / fig_h)
-    fig.tight_layout(rect=[0, 0, 1, 1 - header / fig_h])
+    fig.tight_layout(rect=[0, 0, 1, 1 - header / fig_h], h_pad=1.6)
 
     # etiqueta de cada bloque (tier), ya con las posiciones definitivas
     if row_titles:

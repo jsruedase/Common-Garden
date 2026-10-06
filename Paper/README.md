@@ -91,11 +91,72 @@ texto y línea fina). La orientación de las rejillas se decide sola según el a
 de las fotos: estas terrazas son panorámicas (p.ej. 3820x1088), así que las fechas
 se apilan en vertical y los tiers quedan en columnas.
 
+## Pintar un export sobre su foto (`annotate_export.py`)
+
+Independiente del seguimiento: toma el JSON que exporta Label Studio y devuelve la
+foto con **todas** las anotaciones dibujadas y el `bed_position` de cada cama.
+
+```bash
+python Paper/annotate_export.py export.json
+python Paper/annotate_export.py export.json --labels both        # bed + collection_id
+python Paper/annotate_export.py Assets/annotations/terrace_7.json  # una imagen por fecha
+```
+
+- planta (`plant_polygon`) en **verde**, matera (`pot_ellipse`) en **azul**;
+- **una** etiqueta por cama, no una por región: la planta y su matera comparten
+  `bed_position`, y repetirlo dos veces solo ensucia la imagen;
+- las regiones **sin** `bed_position` salen en rojo con `?`, y el resumen las cuenta:
+  es la lista de lo que falta completar en Label Studio;
+- la foto se resuelve sola desde `data.image` / `file_upload` (quitando el hash de
+  Label Studio y el sufijo `_ls` de las tareas que genera `postprocess.py`); con
+  `--image` se fuerza, y si no aparece se dibuja sobre un lienzo blanco.
+
+Acepta cualquier export: anotado a mano o pre-anotaciones (si no hay `annotations`,
+usa `predictions`). Salida en `Paper/images/annotated/<foto>_annotated.jpg`.
+
+Opciones: `--labels bed|collection|both|none`, `--label-pos above|center`
+(por defecto `above`, para no tapar la roseta), `--out`, `--images`, `--max-width`,
+`--format jpg|png`.
+
+## Pipeline completo sobre una terraza nueva (`pipeline_terrace.py`)
+
+Encadena las tres etapas sobre una carpeta de fotos y deja, por fecha, la imagen
+con las anotaciones y el identificador ya propagado. Es la figura que simula el
+sistema entero funcionando sobre una terraza que el modelo no vio anotada.
+
+```bash
+# con la primera fecha ya anotada en Label Studio (el flujo real)
+python Paper/pipeline_terrace.py --images Assets/images/ST6     --seed-export "C:/ruta/project-2-at-2026-10-06.json"
+
+# sin anotacion: los ids de la fecha 1 son arbitrarios (P01..)
+python Paper/pipeline_terrace.py --images Assets/images/ST6
+```
+
+| paso | que hace | salida |
+|---|---|---|
+| 1 segmentar | YOLO-seg `best.pt` + postproceso (casco convexo / elipse) | `01_segmentacion/` |
+| 2 sembrar | la fecha 1 recibe los `bed_position` del export anotado, emparejando por centroide; lo que el export no respalda queda como `?1..?n` | — |
+| 3 propagar | ICP sobre materas + Hungarian sobre plantas, el **mismo** codigo de la app | `02_tracking/` |
+| 4 dibujar | `annotate_export.py` sobre cada fecha | `03_figuras/` + `<ST>_pipeline.png` |
+
+**Label Studio es el formato de intercambio entre pasos**, no un adorno: cada etapa
+escribe un JSON que se puede abrir, revisar o reimportar, y la siguiente lo lee. Si
+algo sale raro se ve en que etapa paso, y `02_tracking/` se reimporta tal cual para
+corregir a mano.
+
+**Lo que esta figura NO es.** En una terraza sin anotar no hay con que contrastar:
+muestra lo que el pipeline **decidio**, no si acerto. Los `NEW#` son plantas que el
+tracker no logro casar con la plantilla y enrolo como nuevas — pueden ser plantas
+realmente nuevas, o un fallo de identidad. Para numeros hace falta una terraza
+anotada: ver `highlight_track.py` (tier-1).
+
 ## Estructura
 
 | archivo | rol |
 |---|---|
 | `detections.py` | construye "frames enriquecidos" (detección + forma) desde Label Studio o desde YOLO |
+| `annotate_export.py` | pinta un export de Label Studio (anotaciones + `bed_position`) sobre su foto |
+| `pipeline_terrace.py` | encadena segmentar -> sembrar -> propagar -> dibujar sobre una terraza entera |
 | `render.py` | el foco (fondo desaturado en penumbra, planta iluminada) y las rejillas |
 | `highlight_track.py` | driver: sortea, propaga, dibuja, resume |
 

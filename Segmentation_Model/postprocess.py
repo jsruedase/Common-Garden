@@ -112,6 +112,77 @@ def process_instance(cls: int, polygon_xy: np.ndarray) -> dict:
         return out
 
 
+# -----------------------------------------------------------------------------
+# Deduplicado: el segmentador a veces entrega DOS mascaras para el mismo objeto
+# -----------------------------------------------------------------------------
+def instance_polygon(inst: dict, n: int = 72) -> np.ndarray:
+    """
+    Contorno de una instancia como poligono (N,2) float32.
+
+    Tras el post-proceso ambas clases son CONVEXAS (casco convexo la planta,
+    elipse la matera), asi que se pueden intersecar exacto con cv2.
+    """
+    if inst.get("shape") == "ellipse" and inst.get("ellipse"):
+        e = inst["ellipse"]
+        th = np.linspace(0.0, 2.0 * np.pi, n, endpoint=False)
+        rot = np.radians(e["rotation_deg"])
+        c, s_ = np.cos(rot), np.sin(rot)
+        lx, ly = e["rx"] * np.cos(th), e["ry"] * np.sin(th)
+        return np.column_stack([e["cx"] + lx * c - ly * s_,
+                                e["cy"] + lx * s_ + ly * c]).astype(np.float32)
+    return np.asarray(inst.get("polygon", []), dtype=np.float32)
+
+
+def _area(inst: dict) -> float:
+    p = instance_polygon(inst)
+    return float(cv2.contourArea(p)) if len(p) >= 3 else 0.0
+
+
+def overlap(a: dict, b: dict) -> tuple:
+    """(IoU, interseccion/area-menor) entre dos instancias."""
+    pa, pb = instance_polygon(a), instance_polygon(b)
+    if len(pa) < 3 or len(pb) < 3:
+        return 0.0, 0.0
+    inter, _ = cv2.intersectConvexConvex(pa, pb)
+    aa, ab = cv2.contourArea(pa), cv2.contourArea(pb)
+    union = aa + ab - inter
+    small = min(aa, ab)
+    return (inter / union if union > 0 else 0.0), (inter / small if small > 0 else 0.0)
+
+
+def dedupe_instances(instances: list, iou_thr: float = 0.5, contain_thr: float = 0.8):
+    """
+    Quita detecciones repetidas del MISMO objeto y de la MISMA clase.
+
+    Dos frailejones vecinos estan separados por bastante mas que su propio
+    tamano, asi que un solapamiento alto entre instancias de la misma clase no
+    puede ser otra planta: es la misma, detectada dos veces. Importa porque el
+    seguimiento empareja uno-a-uno: de dos mascaras del mismo frailejon, una se
+    queda con la identidad y la otra se enrola como planta NUEVA.
+
+    Se conserva la de mayor area (mismo criterio que build_dataset.dedupe_instances)
+    y se compara contra las ya conservadas, asi un triplete colapsa a una.
+
+    Dos criterios, porque el recorte sobrante suele ser un trozo pequeno dentro
+    del grande y ahi el IoU baja aunque el solapamiento sea total:
+      - IoU >= iou_thr                            (dos mascaras casi iguales)
+      - interseccion / area menor >= contain_thr  (una contenida en la otra)
+
+    Devuelve (instancias_limpias, nro_eliminadas).
+    """
+    order = sorted(range(len(instances)), key=lambda i: _area(instances[i]), reverse=True)
+    kept, removed = [], 0
+    for i in order:
+        ins = instances[i]
+        if any(k.get("class") == ins.get("class")
+               and (lambda o: o[0] >= iou_thr or o[1] >= contain_thr)(overlap(k, ins))
+               for k in kept):
+            removed += 1
+        else:
+            kept.append(ins)
+    return kept, removed
+
+
 def draw_overlay(img, instances):
     for ins in instances:
         if ins["shape"] == "convex_polygon":
@@ -212,11 +283,17 @@ def record_to_labelstudio(record: dict, url_prefix: str = "") -> dict:
 def main():
     ap = argparse.ArgumentParser(description="Convexos (plantas) + elipses (materas)")
     ap.add_argument("--weights", default=Path("Segmentation_Model/best.pt"), type=Path)
-    ap.add_argument("--source", default=Path("Assets/images/1-ST1_Sep_1-5_2025.JPG"), type=Path, help="imagen o carpeta de imágenes")
+    ap.add_argument("--source", default=Path("Assets/images/1-ST6_Sep_1-5_2025.JPG"), type=Path, help="imagen o carpeta de imágenes")
     ap.add_argument("--out", default=Path("Outputs/postprocessed"), type=Path)
     ap.add_argument("--conf", type=float, default=0.25)
     ap.add_argument("--imgsz", type=int, default=1280)
     ap.add_argument("--save-vis", action="store_true", help="guardar overlays .png", default=True)
+    ap.add_argument("--no-dedupe", action="store_true",
+                    help="conservar las detecciones repetidas del mismo objeto")
+    ap.add_argument("--dup-iou", type=float, default=0.5,
+                    help="IoU desde el que dos instancias de la misma clase son la misma")
+    ap.add_argument("--dup-contain", type=float, default=0.8,
+                    help="interseccion/area-menor desde la que una esta contenida en otra")
     ap.add_argument("--labelstudio", action="store_true",
                     help="además, exportar tareas de Label Studio (pre-anotaciones)", default=True)
     ap.add_argument("--ls-out", type=Path, default=Path("Outputs/postprocessed"),
@@ -247,6 +324,10 @@ def main():
             for poly_xy, cls in zip(res.masks.xy, classes):   # masks.xy = polígonos en px
                 if len(poly_xy) >= 3:
                     instances.append(process_instance(int(cls), np.asarray(poly_xy)))
+        if not args.no_dedupe:
+            instances, n_dup = dedupe_instances(instances, args.dup_iou, args.dup_contain)
+            if n_dup:
+                print(f"[dedupe] {stem}: {n_dup} deteccion(es) repetida(s) eliminada(s)")
         record = {
             "image": Path(res.path).name,
             "image_width": int(W),
